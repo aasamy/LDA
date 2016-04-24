@@ -1,3 +1,4 @@
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.types.{LongType, StructField, StructType}
 import org.apache.spark.sql.{Row, DataFrame}
 
@@ -10,6 +11,21 @@ import org.apache.log4j.PropertyConfigurator
   * Time: 5:03 AM
   */
 trait Utils {
+  def median(rdd: RDD[Double]): Double = {
+    val sorted = rdd.sortBy(identity).zipWithIndex().map {
+      case (v, idx) => (idx, v)
+    }
+
+    val count = sorted.count()
+    val median: Double = if (count % 2 == 0) {
+      val l = count / 2 - 1
+      val r = l + 1
+      (sorted.lookup(l).head + sorted.lookup(r).head) / 2
+    } else sorted.lookup(count / 2).head
+
+    median
+  }
+
   def dfZipWithIndex( df: DataFrame,
                       offset: Int = 0,
                       colName: String = "Id",

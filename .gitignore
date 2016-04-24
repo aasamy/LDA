@@ -1,0 +1,40 @@
+/data/Docs-D272236-T291120-K10-I150-1461233997655-part-00000.txt
+/data/StephenData500k.txt
+/data/StephenData_kw500k.txt
+.idea/
+
+# Created by .ignore support plugin (hsz.mobi)
+
+### Scala template
+*.class
+*.log
+
+# sbt specific
+.cache
+.history
+.lib/
+dist/*
+target/
+lib_managed/
+src_managed/
+project/boot/
+project/plugins/project/
+
+# Scala-IDE specific
+.scala_dependencies
+.worksheet
+
+### Java template
+*.class
+
+# Mobile Tools for Java (J2ME)
+.mtj.tmp/
+
+# Package Files #
+*.jar
+*.war
+*.ear
+
+# virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
+hs_err_pid*
+

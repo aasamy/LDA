@@ -220,8 +220,21 @@ object LDAExample {
           println("Document: " + documentId + " Topic: " + topic + "(" + probability + ") - " + keywords)
       }
 
+      val docProbabilites = docs.map(_._3)
+      val (buckets, counts) = docProbabilites.histogram(10)
+      println()
+      for (ii <- counts.indices) {
+        println(s"$ii : ${buckets(ii)} : ${counts(ii)}")
+      }
+      println(s"${buckets.length - 1} : ${buckets.last}")
+
+      val m = median(docProbabilites)
+      println()
+      println(s"Median: $m ${docProbabilites.stats()}")
+      println()
+
       println("Saving Docs...")
-      docs.sortBy(x => x._1, numPartitions = 1).saveAsTextFile(s"${params.outputDir}/Docs-$outputName")
+      docs.sortBy(x => x._1, numPartitions = 1).saveAsTextFile(s"${params.outputDir}/Docs-$outputName-$m")
     }
 
     println("Saving Model...")
@@ -292,6 +305,21 @@ object LDAExample {
     vocab.foreach { case (term, i) => vocabArray(i) = term }
 
     (documents.repartition(6), vocabArray, selectedTokenCount, textIdRDD)
+  }
+
+  private def median(rdd: RDD[Double]): Double = {
+    val sorted = rdd.sortBy(identity).zipWithIndex().map {
+      case (v, idx) => (idx, v)
+    }
+
+    val count = sorted.count()
+    val median: Double = if (count % 2 == 0) {
+      val l = count / 2 - 1
+      val r = l + 1
+      (sorted.lookup(l).head + sorted.lookup(r).head) / 2
+    } else sorted.lookup(count / 2).head
+
+    median
   }
 }
 

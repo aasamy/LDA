@@ -1,3 +1,4 @@
+import org.apache.spark.sql.SQLContext
 import org.apache.spark.{SparkConf, SparkContext}
 
 /**
@@ -41,7 +42,7 @@ object Analyze extends App with Utils {
     println("***** MASTER set to '" + System.getenv("MASTER") + "' ******")
   }
   val sc = new SparkContext(sparkConf)
-  val sqlContext = new org.apache.spark.sql.SQLContext(sc)
+  val sqlContext = new SQLContext(sc)
 
   import org.apache.spark.sql.functions._
   import sqlContext.implicits._
@@ -70,7 +71,27 @@ object Analyze extends App with Utils {
 //  |    8|27956|
 //  |    9|26904|
 //  +-----+-----+
-//  docDistr.select('topic).groupBy('topic).count().show()
+//  docDistr.select('Topic).groupBy('Topic).count().show()
+
+//  0 : 0.12156214047672906 : 2554
+//  1 : 0.20939438661575746 : 18944
+//  2 : 0.2972266327547859 : 42042
+//  3 : 0.3850588788938143 : 48808
+//  4 : 0.4728911250328427 : 48110
+//  5 : 0.5607233711718711 : 38159
+//  6 : 0.6485556173108995 : 29255
+//  7 : 0.7363878634499279 : 19356
+//  8 : 0.8242201095889563 : 10185
+//  9 : 0.9120523557279847 : 12263
+  private val rdd = docDistr.select('Probability).rdd.map(_.getDouble(0))
+//  val (buckets, counts) = rdd.histogram(10)
+//  for (ii <- counts.indices) {
+//    println($"$ii : ${buckets(ii)} : ${counts(ii)}")
+//  }
+//  println($"${buckets.length-1} : ${buckets.last}")
+
+  //  min: 0.12156214047672906, max: 0.9998846018670131, count: 269676
+  println(s"median: ${median(rdd)} ${rdd.stats()}")
 
   // read the original docs/keywords file
   val keywords = sc.textFile(args(1)).zipWithIndex().map(x => (x._2, x._1))
