@@ -4,8 +4,22 @@ import org.apache.spark.{SparkContext, SparkConf}
   * User: aarokiasamy
   * Date: 4/20/16
   * Time: 5:53 AM
+  *
+  * args[0] - The original data file (e.g. StephenData500k.txt)
+  *
   */
-object DataPrep extends App {
+object DataPrep extends App  with Utils {
+
+  if (args.length != 1) {
+    println("args[0] - The original data file (e.g. StephenData500k.txt)")
+    println
+    sys.exit()
+  } else {
+    println(s"Original Data file: ${args(0)}" )
+  }
+
+  setProperties()
+
   val sparkConf = new SparkConf().setAppName(s"DataPrep")
   if (System.getenv("MASTER") == null || System.getenv("MASTER").length == 0) {
     System.out.println("***** MASTER not set. Using local ******")
@@ -24,11 +38,27 @@ object DataPrep extends App {
     .option("delimiter", "|")
     .option("header", "true") // Use first line of all files as header
     .option("inferSchema", "true") // Automatically infer data types
-    .load("data/StephenData500k.txt")
+    .load(args(0))
+    .withColumnRenamed("Competitor Ids", "CompetitorIds")
 
   df.printSchema()
+  df.show()
 
-  val strlen = udf((str: String) => str.length)
+  val strlen = udf((str: String) => if (str == null) 0 else str.trim.length)
+
+  val totalCount = df.count
+  val competitorIdsCount = df.filter(strlen('CompetitorIds) > 0).count
+  val keywordsCount = df.filter(strlen('Keywords) > 0).count
+  val descKwCount = df.filter(strlen('desc_kw) > 0).count
+  val someKwCount = df.filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0).count
+  val competitorIdsAndKeywordsCount = df.filter(strlen('CompetitorIds) > 0 && (strlen('Keywords) > 0 || strlen('desc_kw) > 0)).count
+
+  println("Total Records: " + totalCount)
+  println("Records with CompetitorIds: " + competitorIdsCount)
+  println("Records with Keywords: " + keywordsCount)
+  println("Records with Description Keywords: " + descKwCount)
+  println("Records with Some Keywords: " + someKwCount)
+  println("Records with CompetitorIds and Some Keywords: " + competitorIdsAndKeywordsCount)
 
   // Three options for keywords
   // 1: recurring payment solution -> recurring payment solution
@@ -40,6 +70,11 @@ object DataPrep extends App {
 
   val parseKeyword3Joined = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";").flatMap(_.split(" ")).toSet.mkString(" ")) // toSet to unique the list
 
-  val keywords = df.filter(strlen('Keywords) > 0).select(parseKeyword3Joined('Keywords) as 'ParsedKeywords)
+  val keywords = df.filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0)
+    .select(parseKeyword3Joined('Keywords) as 'ParsedKeywords, parseKeyword3Joined('desc_kw) as 'ParsedDescKeywords)
+    .select(concat($"ParsedKeywords", lit(" "), $"ParsedDescKeywords") as 'AllKeywords)
   keywords.repartition(1).write.text("data/keywords")
+
+  println("Count: " + keywords.count())
+  keywords.show(5, truncate = false)
 }

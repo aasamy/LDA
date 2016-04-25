@@ -53,6 +53,7 @@ object LDAExample {
                              algorithm: String = "em",
                              checkpointDir: Option[String] = None,
                              checkpointInterval: Int = 10,
+                             numPartitions: Int = 8,
                              outputDir: String = "data"
                            ) extends AbstractParams[Params]
 
@@ -101,6 +102,9 @@ object LDAExample {
           s"  Location to write the LDA Model and Document assignments." +
           s"  default: ${defaultParams.outputDir}")
         .action((x, c) => c.copy(outputDir = x))
+      opt[Int]("numPartitions")
+        .text(s"number of partitions to repartition the input data. default: ${defaultParams.numPartitions}")
+        .action((x, c) => c.copy(numPartitions = x))
       arg[String]("<input>...")
         .text("input paths (directories) to plain text corpora." +
           "  Each text file line should hold 1 document.")
@@ -131,7 +135,7 @@ object LDAExample {
 
     // Load documents, and prepare them for LDA.
     val preprocessStart = System.nanoTime()
-    val (corpus, vocabArray, actualNumTokens, textIdRDD) = preprocess(sc, params.input, params.vocabSize, params.stopwordFile)
+    val (corpus, vocabArray, actualNumTokens, textIdRDD) = preprocess(sc, params.input, params.vocabSize, params.stopwordFile, params.numPartitions)
     corpus.cache()
     val actualCorpusSize = corpus.count()
     val actualVocabSize = vocabArray.size
@@ -143,6 +147,7 @@ object LDAExample {
     println(s"\t Vocabulary size: $actualVocabSize terms")
     println(s"\t Training set size: $actualNumTokens tokens")
     println(s"\t Preprocessing time: $preprocessElapsed sec")
+    println(s"\t Max Iterations: ${params.maxIterations} sec")
     println()
 
     val outputName = s"D$actualCorpusSize-T$actualVocabSize-K${params.k}-I${params.maxIterations}-${new Date().getTime}"
@@ -250,7 +255,8 @@ object LDAExample {
   private def preprocess( sc: SparkContext,
                           paths: Seq[String],
                           vocabSize: Int,
-                          stopwordFile: String): (RDD[(Long, Vector)], Array[String], Long, RDD[(String, Long)]) = {
+                          stopwordFile: String,
+                          numPartitions: Int): (RDD[(Long, Vector)], Array[String], Long, RDD[(String, Long)]) = {
 
     // Get dataset of document texts
     // One document per line in each text file. If the input consists of many small files,
@@ -304,7 +310,7 @@ object LDAExample {
     val vocabArray = new Array[String](vocab.size)
     vocab.foreach { case (term, i) => vocabArray(i) = term }
 
-    (documents.repartition(6), vocabArray, selectedTokenCount, textIdRDD)
+    (documents.repartition(numPartitions), vocabArray, selectedTokenCount, textIdRDD)
   }
 
   private def median(rdd: RDD[Double]): Double = {
