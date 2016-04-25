@@ -22,14 +22,14 @@ object Validate extends App with Utils {
     println(s"Original Data file: ${args(0)}")
     println(s"Validation Data file: ${args(1)}")
     println(s"Doc Distribution file: ${args(2)}")
-    run(args(0), args(1), args(2))
+    run(0, args(0), args(1), args(2), "data", "")
   }
 
-  def run(dataFile: String, validationFile: String, docFile: String): (Long, Long, Long, Long, Long, Double) = {
+  def run(k: Int, dataFile: String, validationFile: String, docFile: String, topicDir: String, parent: String): (Long, Long, Long, Long, Long, Double) = {
 
     setProperties()
 
-    val sparkConf = new SparkConf().setAppName(s"Analyze")
+    val sparkConf = new SparkConf().setAppName(s"Validate")
     if (System.getenv("MASTER") == null || System.getenv("MASTER").length == 0) {
       System.out.println("***** MASTER not set. Using local ******")
       sparkConf.setMaster("local[*]")
@@ -48,24 +48,28 @@ object Validate extends App with Utils {
     val trim = udf((str: String) => str.trim)
 
     // read the original data files
-    val originalData = dfZipWithIndex(sqlContext.read
-      .format("com.databricks.spark.csv")
-      .option("delimiter", "|")
-      .option("header", "true") // Use first line of all files as header
-      .option("inferSchema", "true") // Automatically infer data types
-      .load(dataFile)
-      .withColumnRenamed("Company Id", "CompanyId")
-      .withColumnRenamed("Short Name", "Name")
-      .withColumnRenamed("Competitor Ids", "CompetitorIds")
-      .filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0))
-      .select($"*",
-        parseCompetitorIds($"CompetitorIds") as 'ParsedCompetitorIds,
-        parseKeyword3Joined('Keywords) as 'ParsedKeywords,
-        parseKeyword3Joined('desc_kw) as 'ParsedDescKeywords)
+    val originalData = dfZipWithIndex(sqlContext.read.parquet(dataFile).drop("Probability"))
 
     println
-    println("Original Data")
+    println("Original Data. Count: " + originalData.count())
     originalData.show(5)
+
+    // read the Doc Distribution file
+    val docDistr = sc.textFile(docFile).map {
+      line =>
+        val split = line.substring(1, line.length - 1).split(",")
+        (split(0).toInt, split(1).toInt, split(2).toDouble, split(3))
+    }.toDF("Index", "Topic", "Probability", "Keywords")
+
+    val dataWithTopics = originalData.join(docDistr).where($"Id" === $"Index")
+
+    println
+    println("Original Data with Topic assignments")
+    dataWithTopics.show(5)
+    val splitTopics = dataWithTopics.drop("Id").drop("Index").drop("Keywords")
+    for (topic <- 0 until k) {
+      splitTopics.filter($"Topic" === lit(topic)).drop("Topic").write.parquet(s"$topicDir/Topic$parent$topic")
+    }
 
     // read the validation set
     val validationSet = sqlContext.read
@@ -76,20 +80,6 @@ object Validate extends App with Utils {
       .select($"*", trim($"RelatedYesNo") as 'Related)
 
     validationSet.show(5)
-
-    // read the Doc Distribution file
-    val docDistr = sc.textFile(docFile).map {
-      line =>
-        val split = line.substring(1, line.length - 1).split(",")
-        (split(0).toInt, split(1).toInt, split(2).toDouble, split(3))
-    }.toDF("Index", "Topic", "Probability", "Keywords")
-
-    val dataWithTopics = originalData.join(docDistr).where($"Id" === $"Index")
-      .select('CompanyId, 'Name, 'Topic, 'Probability)
-
-    println
-    println("Original Data with Topic assignments")
-    dataWithTopics.show(5)
 
     val compare = dataWithTopics.withColumnRenamed("CompanyId", "CompanyIdLeft").withColumnRenamed("Topic", "TopicLeft")
       .join(validationSet)
@@ -113,6 +103,8 @@ object Validate extends App with Utils {
     println(s"False Positives: $falsePositives")
     println(s"False Negatives: $falseNegatives")
     println(s"Accuracy: $accuracy")
+
+    sc.stop()
 
     (compareCount, truePositives, trueNegatives, falsePositives, falseNegatives, accuracy)
   }

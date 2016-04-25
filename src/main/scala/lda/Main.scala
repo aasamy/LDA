@@ -19,6 +19,7 @@ object Main extends App with Utils {
                     outputDir: String = "data", validationFile: String = "") extends AbstractParams[Params] {
     val name = s"K$k-I$maxIterations-TS${new Date().getTime}"
     val keywordsFile = s"$outputDir/Keywords-$name"
+    val topicDir = s"$outputDir/Topic-K$k-I$maxIterations"
   }
 
   setProperties()
@@ -83,18 +84,24 @@ object Main extends App with Utils {
       .action((x, c) => c.copy(dataFile = x))
   }
 
-  parser.parse(args, defaultParams).map {
-    params =>
-      DataPrep.run(params.dataFile, params.keywordsFile)
-      //    for (k <- params.fromK to params.toK by params.stepK) {
-      //      val (k, logLikelihood, median) = LDAExample.run(params.copy(k = k))
-      //    }
-      val (logLikelihood, median, docFile) = LDAExample.run(params)
+  parser.parse(args, defaultParams).foreach {
+    params => doRun(params, "-", 4) // 5 levels
+  }
 
-      Option(params.validationFile).filter(_.nonEmpty).map {
-        s => val (compareCount, truePositives, trueNegatives, falsePositives, falseNegatives, accuracy) =
-          Validate.run(params.dataFile, params.validationFile, docFile)
-          accuracy
-      }
+  def doRun(params: Params, parent: String, level: Int): Unit = {
+    DataPrep.run(params.dataFile, params.keywordsFile)
+    val k = params.k
+    val (logLikelihood, median, docFile) = LDAExample.run(params)
+
+    Option(params.validationFile).filter(_.nonEmpty).foreach {
+      s => val (compareCount, truePositives, trueNegatives, falsePositives, falseNegatives, accuracy) =
+        Validate.run(k, params.dataFile, params.validationFile, docFile, params.topicDir, parent)
+
+        if (level > 0) {
+          for (t <- 0 until k) {
+            doRun(params.copy(dataFile = s"${params.topicDir}/Topic$parent$t"), s"$parent$t-", level-1)
+          }
+        }
+    }
   }
 }

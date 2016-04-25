@@ -37,50 +37,56 @@ object DataPrep extends App with Utils {
     import org.apache.spark.sql.functions._
     import sqlContext.implicits._
 
-    val df = sqlContext.read
-      .format("com.databricks.spark.csv")
-      .option("delimiter", "|")
-      .option("header", "true") // Use first line of all files as header
-      .option("inferSchema", "true") // Automatically infer data types
-      .load(dataFile)
-      .withColumnRenamed("Competitor Ids", "CompetitorIds")
-
+    println(s"##### Datafile: $dataFile")
+    val df = sqlContext.read.parquet(dataFile)
     df.printSchema()
     df.show(5)
+    df.select('ParsedKeywords).repartition(1).write.text(keywordsFile)
 
-    val strlen = udf((str: String) => if (str == null) 0 else str.trim.length)
-
-    val totalCount = df.count
-    val competitorIdsCount = df.filter(strlen('CompetitorIds) > 0).count
-    val keywordsCount = df.filter(strlen('Keywords) > 0).count
-    val descKwCount = df.filter(strlen('desc_kw) > 0).count
-    val someKwCount = df.filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0).count
-    val competitorIdsAndKeywordsCount = df.filter(strlen('CompetitorIds) > 0 && (strlen('Keywords) > 0 || strlen('desc_kw) > 0)).count
-
-    println("Total Records: " + totalCount)
-    println("Records with CompetitorIds: " + competitorIdsCount)
-    println("Records with Keywords: " + keywordsCount)
-    println("Records with Description Keywords: " + descKwCount)
-    println("Records with Some Keywords: " + someKwCount)
-    println("Records with CompetitorIds and Some Keywords: " + competitorIdsAndKeywordsCount)
-
-    // Three options for keywords
-    // 1: recurring payment solution -> recurring payment solution
-    // 2. recurring payment solution -> recurring_payment_solution (each keyword is a token)
-    // 3. utility billing, usage billing, online usage metering, cloud metering -> utility billing usage online metering cloud (every work gets only one representation)
-    val parseKeyword1 = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";"))
-    val parseKeyword2 = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9;]", "_").split(";"))
-    val parseKeyword3 = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";").flatMap(_.split(" ")).toSet.toList) // toSet to unique the list
-
-    val parseKeyword3Joined = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";").flatMap(_.split(" ")).toSet.mkString(" ")) // toSet to unique the list
-
-    val keywords = df.filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0)
-      .select(parseKeyword3Joined('Keywords) as 'ParsedKeywords, parseKeyword3Joined('desc_kw) as 'ParsedDescKeywords)
-      .select(concat($"ParsedKeywords", lit(" "), $"ParsedDescKeywords") as 'AllKeywords)
-    keywords.repartition(1).write.text(keywordsFile)
-
-    println(s"Count: ${keywords.count()}")
-    keywords.show(5, truncate = false)
+//    val df = sqlContext.read
+//      .format("com.databricks.spark.csv")
+//      .option("delimiter", "|")
+//      .option("header", "true") // Use first line of all files as header
+//      .option("inferSchema", "true") // Automatically infer data types
+//      .load(dataFile)
+//      .withColumnRenamed("Competitor Ids", "CompetitorIds")
+//
+//    df.printSchema()
+//    df.show(5)
+//
+//    val strlen = udf((str: String) => if (str == null) 0 else str.trim.length)
+//
+//    val totalCount = df.count
+//    val competitorIdsCount = df.filter(strlen('CompetitorIds) > 0).count
+//    val keywordsCount = df.filter(strlen('Keywords) > 0).count
+//    val descKwCount = df.filter(strlen('desc_kw) > 0).count
+//    val someKwCount = df.filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0).count
+//    val competitorIdsAndKeywordsCount = df.filter(strlen('CompetitorIds) > 0 && (strlen('Keywords) > 0 || strlen('desc_kw) > 0)).count
+//
+//    println("Total Records: " + totalCount)
+//    println("Records with CompetitorIds: " + competitorIdsCount)
+//    println("Records with Keywords: " + keywordsCount)
+//    println("Records with Description Keywords: " + descKwCount)
+//    println("Records with Some Keywords: " + someKwCount)
+//    println("Records with CompetitorIds and Some Keywords: " + competitorIdsAndKeywordsCount)
+//
+//    // Three options for keywords
+//    // 1: recurring payment solution -> recurring payment solution
+//    // 2. recurring payment solution -> recurring_payment_solution (each keyword is a token)
+//    // 3. utility billing, usage billing, online usage metering, cloud metering -> utility billing usage online metering cloud (every work gets only one representation)
+//    val parseKeyword1 = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";"))
+//    val parseKeyword2 = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9;]", "_").split(";"))
+//    val parseKeyword3 = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";").flatMap(_.split(" ")).toSet.toList) // toSet to unique the list
+//
+//    val parseKeyword3Joined = udf((str: String) => str.toLowerCase.replaceAll("[^A-Za-z0-9; ]", "_").split(";").flatMap(_.split(" ")).toSet.mkString(" ")) // toSet to unique the list
+//
+//    val keywords = df.filter(strlen('Keywords) > 0 || strlen('desc_kw) > 0)
+//      .select(parseKeyword3Joined('Keywords) as 'ParsedKeywords, parseKeyword3Joined('desc_kw) as 'ParsedDescKeywords)
+//      .select(concat($"ParsedKeywords", lit(" "), $"ParsedDescKeywords") as 'AllKeywords)
+//    keywords.repartition(1).write.text(keywordsFile)
+//
+//    println(s"Count: ${keywords.count()}")
+//    keywords.show(5, truncate = false)
 
     sc.stop()
   }
