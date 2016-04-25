@@ -1,9 +1,11 @@
-import org.apache.spark.rdd.RDD
-import org.apache.spark.sql.types.{LongType, StructField, StructType}
-import org.apache.spark.sql.{Row, DataFrame}
+package lda
 
 import java.util.Properties
+
 import org.apache.log4j.PropertyConfigurator
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.types.{LongType, StructField, StructType}
+import org.apache.spark.sql.{DataFrame, Row}
 
 /**
   * User: aarokiasamy

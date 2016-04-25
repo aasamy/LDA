@@ -21,6 +21,8 @@ package org.apache.spark.examples.mllib
 import java.text.BreakIterator
 import java.util.Date
 
+import lda.Main.Params
+
 import scala.collection.mutable
 
 import scopt.OptionParser
@@ -42,86 +44,7 @@ import org.apache.spark.rdd.RDD
   */
 object LDAExample {
 
-  private case class Params(
-                             input: Seq[String] = Seq.empty,
-                             k: Int = 20,
-                             maxIterations: Int = 10,
-                             docConcentration: Double = -1,
-                             topicConcentration: Double = -1,
-                             vocabSize: Int = 10000,
-                             stopwordFile: String = "",
-                             algorithm: String = "em",
-                             checkpointDir: Option[String] = None,
-                             checkpointInterval: Int = 10,
-                             numPartitions: Int = 8,
-                             outputDir: String = "data"
-                           ) extends AbstractParams[Params]
-
-  def main(args: Array[String]) {
-    val defaultParams = Params()
-
-    val parser = new OptionParser[Params]("LDAExample") {
-      head("LDAExample: an example LDA app for plain text data.")
-      opt[Int]("k")
-        .text(s"number of topics. default: ${defaultParams.k}")
-        .action((x, c) => c.copy(k = x))
-      opt[Int]("maxIterations")
-        .text(s"number of iterations of learning. default: ${defaultParams.maxIterations}")
-        .action((x, c) => c.copy(maxIterations = x))
-      opt[Double]("docConcentration")
-        .text(s"amount of topic smoothing to use (> 1.0) (-1=auto)." +
-          s"  default: ${defaultParams.docConcentration}")
-        .action((x, c) => c.copy(docConcentration = x))
-      opt[Double]("topicConcentration")
-        .text(s"amount of term (word) smoothing to use (> 1.0) (-1=auto)." +
-          s"  default: ${defaultParams.topicConcentration}")
-        .action((x, c) => c.copy(topicConcentration = x))
-      opt[Int]("vocabSize")
-        .text(s"number of distinct word types to use, chosen by frequency. (-1=all)" +
-          s"  default: ${defaultParams.vocabSize}")
-        .action((x, c) => c.copy(vocabSize = x))
-      opt[String]("stopwordFile")
-        .text(s"filepath for a list of stopwords. Note: This must fit on a single machine." +
-          s"  default: ${defaultParams.stopwordFile}")
-        .action((x, c) => c.copy(stopwordFile = x))
-      opt[String]("algorithm")
-        .text(s"inference algorithm to use. em and online are supported." +
-          s" default: ${defaultParams.algorithm}")
-        .action((x, c) => c.copy(algorithm = x))
-      opt[String]("checkpointDir")
-        .text(s"Directory for checkpointing intermediate results." +
-          s"  Checkpointing helps with recovery and eliminates temporary shuffle files on disk." +
-          s"  default: ${defaultParams.checkpointDir}")
-        .action((x, c) => c.copy(checkpointDir = Some(x)))
-      opt[Int]("checkpointInterval")
-        .text(s"Iterations between each checkpoint.  Only used if checkpointDir is set." +
-          s" default: ${defaultParams.checkpointInterval}")
-        .action((x, c) => c.copy(checkpointInterval = x))
-      opt[String]("outputDir")
-        .text(s"Directory for output results." +
-          s"  Location to write the LDA Model and Document assignments." +
-          s"  default: ${defaultParams.outputDir}")
-        .action((x, c) => c.copy(outputDir = x))
-      opt[Int]("numPartitions")
-        .text(s"number of partitions to repartition the input data. default: ${defaultParams.numPartitions}")
-        .action((x, c) => c.copy(numPartitions = x))
-      arg[String]("<input>...")
-        .text("input paths (directories) to plain text corpora." +
-          "  Each text file line should hold 1 document.")
-        .unbounded()
-        .required()
-        .action((x, c) => c.copy(input = c.input :+ x))
-    }
-
-    parser.parse(args, defaultParams).map { params =>
-      run(params)
-    }.getOrElse {
-      parser.showUsageAsError
-      sys.exit(1)
-    }
-  }
-
-  private def run(params: Params) {
+  def run(params: Params): (Double, Double, String) = {
     val sparkConf = new SparkConf().setAppName(s"LDAExample with $params")
     if (System.getenv("MASTER") == null || System.getenv("MASTER").length == 0) {
       System.out.println("***** MASTER not set. Using local ******")
@@ -135,7 +58,7 @@ object LDAExample {
 
     // Load documents, and prepare them for LDA.
     val preprocessStart = System.nanoTime()
-    val (corpus, vocabArray, actualNumTokens, textIdRDD) = preprocess(sc, params.input, params.vocabSize, params.stopwordFile, params.numPartitions)
+    val (corpus, vocabArray, actualNumTokens, textIdRDD) = preprocess(sc, params.keywordsFile, params.vocabSize, params.stopwordFile, params.numPartitions)
     corpus.cache()
     val actualCorpusSize = corpus.count()
     val actualVocabSize = vocabArray.size
@@ -147,10 +70,10 @@ object LDAExample {
     println(s"\t Vocabulary size: $actualVocabSize terms")
     println(s"\t Training set size: $actualNumTokens tokens")
     println(s"\t Preprocessing time: $preprocessElapsed sec")
-    println(s"\t Max Iterations: ${params.maxIterations} sec")
+    println(s"\t Max Iterations: ${params.maxIterations}")
     println()
 
-    val outputName = s"D$actualCorpusSize-T$actualVocabSize-K${params.k}-I${params.maxIterations}-${new Date().getTime}"
+    val outputName = s"D$actualCorpusSize-T$actualVocabSize-${params.name}"
 
     // Run LDA.
     val lda = new LDA()
@@ -179,90 +102,97 @@ object LDAExample {
     println(s"Finished training LDA model.  Summary:")
     println(s"\t Training time: $elapsed sec")
 
-    if (ldaModel.isInstanceOf[DistributedLDAModel]) {
-      val distLDAModel = ldaModel.asInstanceOf[DistributedLDAModel]
-      val avgLogLikelihood = distLDAModel.logLikelihood / actualCorpusSize.toDouble
-      println(s"\t Training data average log likelihood: $avgLogLikelihood")
-      println()
-
-      // Print the topics, showing the top-weighted terms for each topic.
-      val topicIndices = ldaModel.describeTopics(maxTermsPerTopic = 10)
-      val topics = topicIndices.map { case (terms, termWeights) =>
-        terms.zip(termWeights).map { case (term, weight) => (vocabArray(term.toInt), weight) }
-      }
-
-//      // also print top 5 documents in each topic
-//      val docsForTopic = distLDAModel.topDocumentsPerTopic(5)
-
-      println(s"${params.k} topics:")
-      topics.zipWithIndex.foreach { case (topic, i) =>
-        println(s"TOPIC $i")
-        topic.foreach { case (term, weight) =>
-          println(s"$term\t$weight")
-        }
+    val (logLikelihood, median, docFile) = ldaModel match {
+      case distLDAModel: DistributedLDAModel =>
+        val avgLogLikelihood = distLDAModel.logLikelihood / actualCorpusSize.toDouble
+        println(s"\t Training data average log likelihood: $avgLogLikelihood")
         println()
 
-//        // top documents in topic
-//        val (docIds, weights) = docsForTopic(i)
-//        for (ii <- docIds.indices) {
-//          println(s"${docIds(ii)}\t${weights(ii)}")
-//        }
-//        println()
-//        println()
-      }
+        // Print the topics, showing the top-weighted terms for each topic.
+        val topicIndices = ldaModel.describeTopics(maxTermsPerTopic = 10)
+        val topics = topicIndices.map { case (terms, termWeights) =>
+          terms.zip(termWeights).map { case (term, weight) => (vocabArray(term.toInt), weight) }
+        }
 
-      val topicDist = distLDAModel.topicDistributions.map {
-        case (documentId, topicDistribution) =>
-          // its a topic distribution, cannot assume head is the one
-          val (probability, topic) = topicDistribution.toArray.zipWithIndex.sortBy(x => -x._1).head
-          (documentId, (topic, probability))
-      }
+//        // also print top 5 documents in each topic
+//        val docsForTopic = distLDAModel.topDocumentsPerTopic(5)
 
-      val docs = topicDist.join(textIdRDD.map(x => (x._2, x._1))).map(x => (x._1, x._2._1._1, x._2._1._2, x._2._2))
+        println(s"${params.k} topics:")
+        topics.zipWithIndex.foreach { case (topic, i) =>
+          println(s"TOPIC $i")
+          topic.foreach { case (term, weight) =>
+            println(s"$term\t$weight")
+          }
+          println()
 
-      docs.take(10).foreach {
-        case (documentId, topic, probability, keywords) =>
-          println("Document: " + documentId + " Topic: " + topic + "(" + probability + ") - " + keywords)
-      }
+//          // top documents in topic
+//          val (docIds, weights) = docsForTopic(i)
+//          for (ii <- docIds.indices) {
+//            println(s"${docIds(ii)}\t${weights(ii)}")
+//          }
+//          println()
+//          println()
+        }
 
-      val docProbabilites = docs.map(_._3)
-      val (buckets, counts) = docProbabilites.histogram(10)
-      println()
-      for (ii <- counts.indices) {
-        println(s"$ii : ${buckets(ii)} : ${counts(ii)}")
-      }
-      println(s"${buckets.length - 1} : ${buckets.last}")
+        val topicDist = distLDAModel.topicDistributions.map {
+          case (documentId, topicDistribution) =>
+            // its a topic distribution, cannot assume head is the one
+            val (probability, topic) = topicDistribution.toArray.zipWithIndex.sortBy(x => -x._1).head
+            (documentId, (topic, probability))
+        }
 
-      val m = median(docProbabilites)
-      println()
-      println(s"Median: $m ${docProbabilites.stats()}")
-      println()
+        val docs = topicDist.join(textIdRDD.map(x => (x._2, x._1))).map(x => (x._1, x._2._1._1, x._2._1._2, x._2._2))
 
-      println("Saving Docs...")
-      docs.sortBy(x => x._1, numPartitions = 1).saveAsTextFile(s"${params.outputDir}/Docs-$outputName-$m")
+        docs.take(10).foreach {
+          case (documentId, topic, probability, keywords) =>
+            println("Document: " + documentId + " Topic: " + topic + "(" + probability + ") - " + keywords)
+        }
+
+        val docProbabilites = docs.map(_._3)
+        val (buckets, counts) = docProbabilites.histogram(10)
+        println()
+        for (ii <- counts.indices) {
+          println(s"$ii : ${buckets(ii)} : ${counts(ii)}")
+        }
+        println(s"${buckets.length - 1} : ${buckets.last}")
+
+        val m = getMedian(docProbabilites)
+        println()
+        println(s"Median: $m ${docProbabilites.stats()}")
+        println()
+
+        println("Saving Docs...")
+        val docFile = s"${params.outputDir}/Docs-$outputName-M$m"
+        docs.sortBy(x => x._1, numPartitions = 1).saveAsTextFile(docFile)
+
+        (avgLogLikelihood, m, docFile)
+      case _ =>
+        (0.0, 0.0, "")
     }
 
     println("Saving Model...")
     ldaModel.save(sc, s"${params.outputDir}/LDAModel-$outputName")
 
     sc.stop()
+
+    (logLikelihood, median, docFile)
   }
 
   /**
     * Load documents, tokenize them, create vocabulary, and prepare documents as term count vectors.
     * @return (corpus, vocabulary as array, total token count in corpus)
     */
-  private def preprocess( sc: SparkContext,
-                          paths: Seq[String],
-                          vocabSize: Int,
-                          stopwordFile: String,
-                          numPartitions: Int): (RDD[(Long, Vector)], Array[String], Long, RDD[(String, Long)]) = {
+  private def preprocess(sc: SparkContext,
+                         path: String,
+                         vocabSize: Int,
+                         stopwordFile: String,
+                         numPartitions: Int): (RDD[(Long, Vector)], Array[String], Long, RDD[(String, Long)]) = {
 
     // Get dataset of document texts
     // One document per line in each text file. If the input consists of many small files,
     // this can result in a large number of small partitions, which can degrade performance.
     // In this case, consider using coalesce() to create fewer, larger partitions.
-    val textRDD: RDD[String] = sc.textFile(paths.mkString(","))
+    val textRDD: RDD[String] = sc.textFile(path)
     val textIdRDD = textRDD.zipWithIndex()
 
     // Split text into words
@@ -313,7 +243,7 @@ object LDAExample {
     (documents.repartition(numPartitions), vocabArray, selectedTokenCount, textIdRDD)
   }
 
-  private def median(rdd: RDD[Double]): Double = {
+  private def getMedian(rdd: RDD[Double]): Double = {
     val sorted = rdd.sortBy(identity).zipWithIndex().map {
       case (v, idx) => (idx, v)
     }
