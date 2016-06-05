@@ -22,10 +22,6 @@ object Validate extends App with Utils {
     println(s"Original Data file: ${args(0)}")
     println(s"Validation Data file: ${args(1)}")
     println(s"Doc Distribution file: ${args(2)}")
-    run(0, args(0), args(1), args(2), "data", "")
-  }
-
-  def run(k: Int, dataFile: String, validationFile: String, docFile: String, topicDir: String, parent: String): (Long, Long, Long, Long, Long, Double) = {
 
     setProperties()
 
@@ -37,6 +33,13 @@ object Validate extends App with Utils {
       println("***** MASTER set to '" + System.getenv("MASTER") + "' ******")
     }
     val sc = new SparkContext(sparkConf)
+
+    run(sc, 0, args(0), args(1), args(2), "data", "")
+
+    sc.stop()
+  }
+
+  def run(sc: SparkContext, k: Int, dataFile: String, validationFile: String, docFile: String, topicDir: String, parent: String): (Long, Long, Long, Long, Long, Double) = {
     val sqlContext = new SQLContext(sc)
 
     import org.apache.spark.sql.functions._
@@ -103,8 +106,6 @@ object Validate extends App with Utils {
     println(s"False Positives: $falsePositives")
     println(s"False Negatives: $falseNegatives")
     println(s"Accuracy: $accuracy")
-
-    sc.stop()
 
     (compareCount, truePositives, trueNegatives, falsePositives, falseNegatives, accuracy)
   }

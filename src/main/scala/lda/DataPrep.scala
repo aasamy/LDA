@@ -16,12 +16,6 @@ object DataPrep extends App with Utils {
     println
     sys.exit()
   } else {
-    println(s"Original Data file: ${args(0)}")
-    run(args(0), args(1))
-  }
-
-  def run(dataFile: String, keywordsFile: String) = {
-
     setProperties()
 
     val sparkConf = new SparkConf().setAppName(s"DataPrep")
@@ -32,6 +26,15 @@ object DataPrep extends App with Utils {
       println("***** MASTER set to '" + System.getenv("MASTER") + "' ******")
     }
     val sc = new SparkContext(sparkConf)
+
+    println(s"Original Data file: ${args(0)}")
+    run(sc, args(0), args(1))
+
+    sc.stop()
+  }
+
+  def run(sc: SparkContext, dataFile: String, keywordsFile: String) = {
+
     val sqlContext = new org.apache.spark.sql.SQLContext(sc)
 
     import org.apache.spark.sql.functions._
@@ -41,7 +44,8 @@ object DataPrep extends App with Utils {
     val df = sqlContext.read.parquet(dataFile)
     df.printSchema()
     df.show(5)
-    df.select('ParsedKeywords).repartition(1).write.text(keywordsFile)
+    df.select('ParsedKeywords).repartition(1).rdd.map(_.getAs[String](0)).saveAsTextFile(keywordsFile)
+    // df.select('ParsedKeywords).repartition(1).write.text(keywordsFile)
 
 //    val df = sqlContext.read
 //      .format("com.databricks.spark.csv")
@@ -87,7 +91,5 @@ object DataPrep extends App with Utils {
 //
 //    println(s"Count: ${keywords.count()}")
 //    keywords.show(5, truncate = false)
-
-    sc.stop()
   }
 }

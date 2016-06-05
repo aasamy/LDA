@@ -3,6 +3,7 @@ package lda
 import java.util.Date
 
 import org.apache.spark.examples.mllib.{AbstractParams, LDAExample}
+import org.apache.spark.{SparkConf, SparkContext}
 import scopt.OptionParser
 
 /**
@@ -12,7 +13,7 @@ import scopt.OptionParser
   */
 object Main extends App with Utils {
 
-  case class Params(dataFile: String = "", k: Int = 20, fromK: Int = 20, toK: Int = 20, stepK: Int = 10,
+  case class Params(dataFile: String = "", k: Int = 20, fromK: Int = 20, toK: Int = 20, stepK: Int = 10, level: Int = 1,
                     maxIterations: Int = 10, docConcentration: Double = -1, topicConcentration: Double = -1,
                     vocabSize: Int = 10000, stopwordFile: String = "", algorithm: String = "em",
                     checkpointDir: Option[String] = None, checkpointInterval: Int = 10, numPartitions: Int = 8,
@@ -43,6 +44,9 @@ object Main extends App with Utils {
     opt[Int]("maxIterations")
       .text(s"number of iterations of learning. default: ${defaultParams.maxIterations}")
       .action((x, c) => c.copy(maxIterations = x))
+    opt[Int]("level")
+      .text(s"number of levels of the tree to expand. default: ${defaultParams.level}")
+      .action((x, c) => c.copy(level = x))
     opt[Double]("docConcentration")
       .text(s"amount of topic smoothing to use (> 1.0) (-1=auto). default: ${defaultParams.docConcentration}")
       .action((x, c) => c.copy(docConcentration = x))
@@ -85,21 +89,37 @@ object Main extends App with Utils {
   }
 
   parser.parse(args, defaultParams).foreach {
-    params => doRun(params, "-", 4) // 5 levels
+    params =>
+      setProperties()
+
+      val sparkConf = new SparkConf().setAppName(s"LDA with $params")
+      if (System.getenv("MASTER") == null || System.getenv("MASTER").length == 0) {
+        System.out.println("***** MASTER not set. Using local ******")
+        sparkConf.setMaster("local[*]")
+      } else {
+        println("***** MASTER set to '" + System.getenv("MASTER") + "' ******")
+      }
+      val sc = new SparkContext(sparkConf)
+
+      doRun(sc, params, "-", params.level)
   }
 
-  def doRun(params: Params, parent: String, level: Int): Unit = {
-    DataPrep.run(params.dataFile, params.keywordsFile)
+  def doRun(sc: SparkContext, params: Params, parent: String, level: Int): Unit = {
+    println(s"Processing Topic $parent Level $level")
+    DataPrep.run(sc, params.dataFile, params.keywordsFile)
     val k = params.k
-    val (logLikelihood, median, docFile) = LDAExample.run(params)
+    println(s"Processing Topic $parent Level $level")
+    val (logLikelihood, median, docFile) = LDAExample.run(sc, params)
 
     Option(params.validationFile).filter(_.nonEmpty).foreach {
-      s => val (compareCount, truePositives, trueNegatives, falsePositives, falseNegatives, accuracy) =
-        Validate.run(k, params.dataFile, params.validationFile, docFile, params.topicDir, parent)
+      s =>
+        println(s"Processing Topic $parent Level $level")
+        val (compareCount, truePositives, trueNegatives, falsePositives, falseNegatives, accuracy) =
+          Validate.run(sc, k, params.dataFile, params.validationFile, docFile, params.topicDir, parent)
 
-        if (level > 0) {
+        if (level > 1) {
           for (t <- 0 until k) {
-            doRun(params.copy(dataFile = s"${params.topicDir}/Topic$parent$t"), s"$parent$t-", level-1)
+            doRun(sc, params.copy(dataFile = s"${params.topicDir}/Topic$parent$t"), s"$parent$t-", level-1)
           }
         }
     }

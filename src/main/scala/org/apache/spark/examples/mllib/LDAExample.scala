@@ -44,16 +44,7 @@ import org.apache.spark.rdd.RDD
   */
 object LDAExample {
 
-  def run(params: Params): (Double, Double, String) = {
-    val sparkConf = new SparkConf().setAppName(s"LDAExample with $params")
-    if (System.getenv("MASTER") == null || System.getenv("MASTER").length == 0) {
-      System.out.println("***** MASTER not set. Using local ******")
-      sparkConf.setMaster("local[*]")
-    } else {
-      println("***** MASTER set to '" + System.getenv("MASTER") + "' ******")
-    }
-    val sc = new SparkContext(sparkConf)
-
+  def run(sc: SparkContext, params: Params): (Double, Double, String) = {
     Logger.getRootLogger.setLevel(Level.WARN)
 
     // Load documents, and prepare them for LDA.
@@ -172,8 +163,6 @@ object LDAExample {
 
     println("Saving Model...")
     ldaModel.save(sc, s"${params.outputDir}/LDAModel-$outputName")
-
-    sc.stop()
 
     (logLikelihood, median, docFile)
   }
